@@ -225,6 +225,13 @@ public class SpecificCompiler {
     this.enableDecimalLogicalType = enableDecimalLogicalType;
   }
 
+  /**
+   * @return true if decimal logical type conversion is enabled
+   */
+  public boolean isDecimalEnabled() {
+    return enableDecimalLogicalType;
+  }
+
   private static String logChuteName = null;
 
   private void initializeVelocity() {
@@ -655,6 +662,13 @@ public class SpecificCompiler {
     for (Schema.Field field : schema.getFields()) {
       if (field.schema().getLogicalType() != null) {
         return true;
+      }
+      if (field.schema().getType() == Schema.Type.UNION) {
+        for (Schema unionSchema : field.schema().getTypes()) {
+          if (unionSchema.getLogicalType() != null) {
+            return true;
+          }
+        }
       }
     }
     return false;

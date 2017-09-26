@@ -122,7 +122,7 @@
           <plugin>
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>exec-maven-plugin</artifactId>
-            <version>${exec-plugin.version}</version>
+            <version>1.6.0</version>
             <executions>
               <!-- Generate random data for interop tests, using null codec -->
               <execution>

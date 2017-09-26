@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,12 +18,16 @@
 package org.apache.avro.specific;
 
 import org.apache.avro.Conversion;
+import org.apache.avro.LogicalType;
 import org.apache.avro.Schema;
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.io.ResolvingDecoder;
 import org.apache.avro.util.ClassUtils;
+
 import java.io.IOException;
+import java.util.LinkedList;
+import java.util.Map;
 
 /** {@link org.apache.avro.io.DatumReader DatumReader} for generated Java classes. */
 public class SpecificDatumReader<T> extends GenericDatumReader<T> {
@@ -60,14 +64,52 @@ public class SpecificDatumReader<T> extends GenericDatumReader<T> {
   }
 
   /** Return the contained {@link SpecificData}. */
-  public SpecificData getSpecificData() { return (SpecificData)getData(); }
+  public SpecificData getSpecificData() {
+    return (SpecificData) getData();
+  }
+
+  private final ThreadLocal<LinkedList<Map<String, Conversion<?>>>> conversions
+    = new ThreadLocal<LinkedList<Map<String, Conversion<?>>>>() {
+    @Override
+    protected LinkedList<Map<String, Conversion<?>>> initialValue() {
+      return new LinkedList<Map<String, Conversion<?>>>();
+    }
+  };
+
+  protected Conversion<?> getConversionFor(LogicalType logicalType) {
+    if (logicalType == null) {
+      return null;
+    }
+    Conversion<?> conversion = conversions.get().peekLast()
+      .get(logicalType.getName());
+    if (conversion == null) {
+      conversion = super.getConversionFor(logicalType);
+    }
+    return conversion;
+  }
+
+  protected Conversion<?> getConversionByClass(Class<?> type,
+                                               LogicalType logicalType) {
+    if (logicalType == null) {
+      return null;
+    }
+    // Check for logical types conversions used by the specific compiler. No
+    // need to use the class because the compiler always produces code with the
+    // same class if it used a conversion.
+    Conversion<?> conversion = conversions.get().peekLast()
+      .get(logicalType.getName());
+    if (conversion == null) {
+      conversion = super.getConversionByClass(type, logicalType);
+    }
+    return conversion;
+  }
 
   @Override
   public void setSchema(Schema actual) {
     // if expected is unset and actual is a specific record,
     // then default expected to schema of currently loaded class
     if (getExpected() == null && actual != null
-        && actual.getType() == Schema.Type.RECORD) {
+      && actual.getType() == Schema.Type.RECORD) {
       SpecificData data = getSpecificData();
       Class c = data.getClass(actual);
       if (c != null && SpecificRecord.class.isAssignableFrom(c))
@@ -76,15 +118,16 @@ public class SpecificDatumReader<T> extends GenericDatumReader<T> {
     super.setSchema(actual);
   }
 
-  @Override protected Class findStringClass(Schema schema) {
+  @Override
+  protected Class findStringClass(Schema schema) {
     Class stringClass = null;
     switch (schema.getType()) {
-    case STRING:
-      stringClass = getPropAsClass(schema, SpecificData.CLASS_PROP);
-      break;
-    case MAP:
-      stringClass = getPropAsClass(schema, SpecificData.KEY_CLASS_PROP);
-      break;
+      case STRING:
+        stringClass = getPropAsClass(schema, SpecificData.CLASS_PROP);
+        break;
+      case MAP:
+        stringClass = getPropAsClass(schema, SpecificData.KEY_CLASS_PROP);
+        break;
     }
     if (stringClass != null)
       return stringClass;
@@ -104,14 +147,14 @@ public class SpecificDatumReader<T> extends GenericDatumReader<T> {
   @Override
   protected void readField(Object r, Schema.Field f, Object oldDatum,
                            ResolvingDecoder in, Object state)
-      throws IOException {
+    throws IOException {
     if (r instanceof SpecificRecordBase) {
       Conversion<?> conversion = ((SpecificRecordBase) r).getConversion(f.pos());
 
       Object datum;
       if (conversion != null) {
         datum = readWithConversion(
-            oldDatum, f.schema(), f.schema().getLogicalType(), conversion, in);
+          oldDatum, f.schema(), f.schema().getLogicalType(), conversion, in);
       } else {
         datum = readWithoutConversion(oldDatum, f.schema(), in);
       }
@@ -122,5 +165,19 @@ public class SpecificDatumReader<T> extends GenericDatumReader<T> {
       super.readField(r, f, oldDatum, in, state);
     }
   }
+
+  @Override
+  protected Object readRecord(Object old, final Schema expected,
+                              ResolvingDecoder in)
+    throws IOException {
+    // Update the current set of conversions for the record class
+    Map<String, Conversion<?>> conversionMap =
+      getSpecificData().getConversionMap(expected);
+    conversions.get().addLast(conversionMap);
+    Object record = super.readRecord(old, expected, in);
+    conversions.get().removeLast();
+    return record;
+  }
+
 }
 
